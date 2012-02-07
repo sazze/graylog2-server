@@ -18,29 +18,23 @@
  *
  */
 
-package org.graylog2.hostgroups;
+package org.graylog2.streams.matchers;
 
-import java.util.ArrayList;
-import org.junit.Test;
-import static org.junit.Assert.*;
+import java.util.regex.Pattern;
+import org.graylog2.messagehandlers.gelf.GELFMessage;
+import org.graylog2.streams.StreamRule;
 
-public class HostgroupCacheTest {
+/**
+ * HostRegeMatcher.java: Jun 21, 2011 9:56:31 PM
+ *
+ * [description]
+ *
+ * @author Lennart Koopmann <lennart@socketfeed.com>
+ */
+public class HostRegexMatcher implements StreamRuleMatcherIF {
 
-    @Test
-    public void testGetInstance() {
-        // First call should create instance.
-        assertNotNull(HostgroupCache.getInstance());
-
-        // Second call should give back formerly created instance.
-        assertNotNull(HostgroupCache.getInstance());
+    public boolean match(GELFMessage msg, StreamRule rule) {
+        return Pattern.compile(rule.getValue(), Pattern.DOTALL).matcher(msg.getHost()).matches();
     }
-
-    @Test
-    public void testSetAndGet() {
-        HostgroupCache.getInstance().set(new ArrayList<Hostgroup>());
-        HostgroupCache.getInstance().get();
-        assertTrue(HostgroupCache.getInstance().valid());
-    }
-
 
 }

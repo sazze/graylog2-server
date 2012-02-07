@@ -18,30 +18,26 @@
  *
  */
 
-package org.graylog2.hostgroups;
+package org.graylog2.streams.matchers;
 
-import com.mongodb.BasicDBObject;
-import org.bson.types.ObjectId;
-import org.junit.Test;
-import static org.junit.Assert.*;
+import java.util.regex.Pattern;
+import org.graylog2.messagehandlers.gelf.GELFMessage;
+import org.graylog2.streams.StreamRule;
 
+/**
+ * FullMessageMatcher.java: Mar 27, 2011 4:50:34 PM
+ *
+ * [description]
+ *
+ * @author Dennis Oelkers <dennis@lauschmusik.de>
+ */
+public class FullMessageMatcher implements StreamRuleMatcherIF {
 
-public class HostgroupTest {
-
-    @Test
-    public void testStream() {
-        BasicDBObject mongo = new BasicDBObject();
-
-        ObjectId id = new ObjectId();
-        mongo.put("_id", id);
-        mongo.put("name", "foo");
-
-        Hostgroup group = new Hostgroup(mongo);
-
-        assertEquals(id, group.getId());
-        assertEquals("foo", group.getName());
+    public boolean match(GELFMessage msg, StreamRule rule) {
+	Pattern messagePattern = Pattern.compile(rule.getValue(), Pattern.DOTALL);
+	String fullMessage = msg.getFullMessage();
+		
+        return (fullMessage != null && messagePattern.matcher(msg.getFullMessage()).matches());
     }
-
-    // Get hosts not really testable because it is not an embedded doc of hostgroup yet.
 
 }

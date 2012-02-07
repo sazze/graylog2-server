@@ -1,6 +1,6 @@
 /**
  * Copyright 2010, 2011 Lennart Koopmann <lennart@socketfeed.com>
- * 
+ *
  * This file is part of Graylog2.
  *
  * Graylog2 is free software: you can redistribute it and/or modify
@@ -29,25 +29,28 @@ import org.productivity.java.syslog4j.server.SyslogServerIF;
 import org.productivity.java.syslog4j.server.SyslogServerSessionlessEventHandlerIF;
 
 import java.net.SocketAddress;
-import org.joda.time.DateTime;
+import java.net.UnknownHostException;
+import java.util.Date;
+import org.graylog2.Main;
 
 /**
  * SyslogEventHandler.java: May 17, 2010 8:58:18 PM
- *
+ * <p/>
  * Handles incoming Syslog messages
  *
- * @author: Lennart Koopmann <lennart@socketfeed.com>
+ * @author Lennart Koopmann <lennart@socketfeed.com>
  */
 public class SyslogEventHandler implements SyslogServerSessionlessEventHandlerIF {
 
     private static final Logger LOG = Logger.getLogger(SyslogEventHandler.class);
-    
+
     /**
      * Handle an incoming syslog message: Output if in debug mode, store in MongoDB, ReceiveHooks
      *
      * @param syslogServer The syslog server
-     * @param event The event to handle
+     * @param event        The event to handle
      */
+    @Override
     public void event(SyslogServerIF syslogServer, SocketAddress socketAddress, SyslogServerEventIF event) {
 
         GELFMessage gelf = new GELFMessage();
@@ -55,55 +58,80 @@ public class SyslogEventHandler implements SyslogServerSessionlessEventHandlerIF
         // Print out debug information.
         if (event instanceof GraylogSyslogServerEvent) {
             GraylogSyslogServerEvent glEvent = (GraylogSyslogServerEvent) event;
-            LOG.info("Received syslog message (via AMQP): " + event.getMessage());
-            LOG.info("AMQP queue: " + glEvent.getAmqpReceiverQueue());
+            LOG.debug("Received syslog message (via AMQP): " + event.getMessage());
+            LOG.debug("AMQP queue: " + glEvent.getAmqpReceiverQueue());
 
             gelf.addAdditionalData("_amqp_queue", glEvent.getAmqpReceiverQueue());
         } else {
-            LOG.info("Received syslog message: " + event.getMessage());
+            LOG.debug("Received syslog message: " + event.getMessage());
         }
-        LOG.info("Host: " + event.getHost());
-        LOG.info("Facility: " + event.getFacility() + " (" + Tools.syslogFacilityToReadable(event.getFacility()) + ")");
-        LOG.info("Level: " + event.getLevel() + " (" + Tools.syslogLevelToReadable(event.getLevel()) + ")");
-        LOG.info("Raw: " + new String(event.getRaw()));
+        LOG.debug("Host: " + event.getHost());
+        LOG.debug("Facility: " + event.getFacility() + " (" + Tools.syslogFacilityToReadable(event.getFacility()) + ")");
+        LOG.debug("Level: " + event.getLevel() + " (" + Tools.syslogLevelToReadable(event.getLevel()) + ")");
+        LOG.debug("Raw: " + new String(event.getRaw()));
+        LOG.debug("Host stripped from message? " + event.isHostStrippedFromMessage());
 
-        // Use JodaTime to easy get the milliseconds and construct a float. (This looks dumb but is the easiest and safest way)
+        // Check if date could be parsed.
+        if (event.getDate() == null) {
+            if (Main.configuration.getAllowOverrideSyslogDate()) {
+                // empty Date constructor allocates a Date object and initializes it so that it represents the time at which it was allocated.
+                event.setDate(new Date());
+                LOG.info("Date could not be parsed. Was set to NOW because allow_override_syslog_date is true.");
+            } else {
+                LOG.info("Syslog message is missing date or date could not be parsed. (Possibly set allow_override_syslog_date to true) "
+                        + "Not further handling. Message was: " + new String(event.getRaw()));
+                return;
+            }
+        }
+
+        // Possibly overwrite host with RNDS if configured.
+        String host = event.getHost();
         try {
-            DateTime jt = new DateTime(event.getDate().getTime());
-            String unixTime = String.valueOf(event.getDate().getTime()/1000L);
-            String millis = String.valueOf(jt.getMillisOfSecond());
-            Double milliSecondTime = new Double(unixTime + "." + millis);
-            gelf.setCreatedAt(milliSecondTime.doubleValue());
-        } catch (NumberFormatException e) {
-            LOG.error("Could not determine milliseconds of syslog message. (NumberFormatException)");
+            if (Main.configuration.getForceSyslogRdns()) {
+                host = Tools.rdnsLookup(socketAddress);
+            }
+        } catch (UnknownHostException e) {
+            LOG.warn("Reverse DNS lookup failed. Falling back to parsed hostname.", e);
+        }
+
+        try {
+            gelf.setCreatedAt(Tools.getUTCTimestampWithMilliseconds(event.getDate().getTime()));
+            gelf.setConvertedFromSyslog(true);
+            gelf.setVersion("0");
+            gelf.setShortMessage(event.getMessage());
+            gelf.setFullMessage(new String(event.getRaw()));
+            gelf.setHost(host);
+            gelf.setFacility(Tools.syslogFacilityToReadable(event.getFacility()));
+            gelf.setLevel(event.getLevel());
+            gelf.setRaw(event.getRaw());
+        } catch (Exception e) {
+            LOG.info("Could not parse syslog message to GELF: " + e.toString(), e);
+            return;
         }
         
-
-        gelf.setConvertedFromSyslog(true);
-        gelf.setVersion("0");
-        gelf.setShortMessage(event.getMessage());
-        
-        gelf.setHost(event.getHost());
-        gelf.setFacility(Tools.syslogFacilityToReadable(event.getFacility()));
-        gelf.setLevel(event.getLevel());
-        gelf.setRaw(event.getRaw());
-
-        try {
-            SimpleGELFClientHandler gelfHandler = new SimpleGELFClientHandler(gelf);
-            gelfHandler.handle();
-        } catch ( Exception e ) {
-            // I don't care
+        if (gelf.allRequiredFieldsSet()) {
+            try {
+                SimpleGELFClientHandler gelfHandler = new SimpleGELFClientHandler(gelf);
+                gelfHandler.handle();
+            } catch (Exception e) {
+                LOG.debug("Couldn't process message with GELF handler", e);
+            }
+        } else {
+            LOG.info("Broken or incomplete syslog message. Not further handling. Message was: " + event.getRaw());
         }
     }
 
+    @Override
     public void exception(SyslogServerIF syslogServer, SocketAddress socketAddress, Exception exception) {
         throw new UnsupportedOperationException("Not supported yet.");
     }
 
+    @Override
     public void initialize(SyslogServerIF syslogServer) {
         throw new UnsupportedOperationException("Not supported yet.");
     }
 
+    @Override
     public void destroy(SyslogServerIF syslogServer) {
         throw new UnsupportedOperationException("Not supported yet.");
     }
