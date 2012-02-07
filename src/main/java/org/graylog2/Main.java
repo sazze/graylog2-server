@@ -63,10 +63,7 @@ import java.util.concurrent.TimeUnit;
 public final class Main {
 
     private static final Logger LOG = Logger.getLogger(Main.class);
-    private static final String GRAYLOG2_VERSION = "0.9.6p1";
-
-    private static final int INDEX_CHECK_RETRIES = 15;
-    private static final int INDEX_CHECK_INTERVAL_SEC = 5;
+    private static final String GRAYLOG2_VERSION = "0.9.7-dev";
 
     public static RulesEngine drools = null;
     private static final int SCHEDULED_THREADS_POOL_SIZE = 7;
@@ -128,33 +125,23 @@ public final class Main {
             System.exit(0);
         }
 
-        /*
-         * Check if the index exists. Create it if not.
-         * (Try this a few times to allow ElasticSearch to come up.)
-         */
-        boolean indexNotChecked = true;
-        int indexCheckIntervalCount = 1;
-        while(indexNotChecked) {
-            try {
-                if (checkAndCreateIndex()) {
-                    break;
+        // XXX ELASTIC: put in own method
+        // Check if the index exists. Create it if not.
+        try {
+            if (Indexer.indexExists()) {
+                LOG.info("Index exists. Not creating it.");
+            } else {
+                LOG.info("Index does not exist! Trying to create it ...");
+                if (Indexer.createIndex()) {
+                    LOG.info("Successfully created index.");
+                } else {
+                    LOG.fatal("Could not create Index. Terminating.");
+                    System.exit(1);
                 }
-            } catch (IOException e) {
-                LOG.warn("Could not check for or create ElasticSearch index. [" + indexCheckIntervalCount + "] "
-                        + "Retrying in " + INDEX_CHECK_INTERVAL_SEC + " seconds.", e);
             }
-
-            // Abort if last retry failed.
-            if (indexCheckIntervalCount == INDEX_CHECK_RETRIES) {
-                LOG.fatal("Could not check for ElasticSearch index after " + INDEX_CHECK_RETRIES + " retries."
-                        + "Make sure that your ElasticSearch server is running.");
-                System.exit(1);
-            }
-
-            indexCheckIntervalCount++;
-            try {
-                Thread.sleep(INDEX_CHECK_INTERVAL_SEC * 1000);
-            } catch (InterruptedException e) { }
+        } catch (IOException e) {
+            LOG.fatal("IOException while trying to check Index. Make sure that your ElasticSearch server is running.", e);
+            System.exit(1);
         }
 
         savePidFile(commandLineArguments.getPidFile());
@@ -167,7 +154,7 @@ public final class Main {
 
         initializeMongoConnection(configuration);
         initializeRulesEngine(configuration.getDroolsRulesFile());
-        initializeSyslogServer(configuration.getSyslogProtocol(), configuration.getSyslogListenPort());
+        initializeSyslogServer(configuration.getSyslogProtocol(), configuration.getSyslogListenPort(), configuration.getSyslogListenAddress());
         initializeHostCounterCache(scheduler);
 
         // Start message counter thread.
@@ -253,10 +240,10 @@ public final class Main {
         LOG.info("GELF threads started");
     }
 
-    private static void initializeSyslogServer(String syslogProtocol, int syslogPort) {
+    private static void initializeSyslogServer(String syslogProtocol, int syslogPort, String syslogHost) {
 
         // Start the Syslog thread that accepts syslog packages.
-        SyslogServerThread syslogServerThread = new SyslogServerThread(syslogProtocol, syslogPort);
+        SyslogServerThread syslogServerThread = new SyslogServerThread(syslogProtocol, syslogPort, syslogHost);
         syslogServerThread.start();
 
         // Check if the thread started up completely.
@@ -361,20 +348,5 @@ public final class Main {
         ServerValue.writeMessageQueueMaximumSize(configuration.getMessageQueueMaximumSize());
         ServerValue.writeMessageQueueBatchSize(configuration.getMessageQueueBatchSize());
         ServerValue.writeMessageQueuePollFrequency(configuration.getMessageQueuePollFrequency());
-    }
-
-    public static boolean checkAndCreateIndex() throws IOException {
-        if (Indexer.indexExists()) {
-            LOG.info("Index exists. Not creating it.");
-            return true;
-        } else {
-            LOG.info("Index does not exist! Trying to create it ...");
-            if (Indexer.createIndex()) {
-                LOG.info("Successfully created index.");
-                return true;
-            } else {
-                return false;
-            }
-        }
     }
 }

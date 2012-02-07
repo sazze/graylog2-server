@@ -53,6 +53,9 @@ public class Configuration {
     @Parameter(value = "syslog_protocol", required = true)
     private String syslogProtocol = "udp";
 
+    @Parameter(value = "syslog_listen_address")
+    private String syslogListenAddress = "0.0.0.0";
+
     @Parameter(value = "force_syslog_rdns", required = true)
     private boolean forceSyslogRdns = false;
 
@@ -104,6 +107,9 @@ public class Configuration {
     @Parameter(value = "mq_max_size", required = false, validator = PositiveIntegerValidator.class)
     private int mqMaxSize = 0;
 
+    @Parameter(value = "enable_realtime_collection", required = true)
+    private boolean enableRealtimeCollection = true;
+
     @Parameter(value = "use_gelf", required = true)
     private boolean useGELF = false;
 
@@ -142,6 +148,10 @@ public class Configuration {
 
     public int getSyslogListenPort() {
         return syslogListenPort;
+    }
+
+    public String getSyslogListenAddress() {
+        return syslogListenAddress;
     }
 
     public String getSyslogProtocol() {
@@ -217,6 +227,10 @@ public class Configuration {
 
     public int getMessageQueueMaximumSize() {
         return mqMaxSize;
+    }
+
+    public boolean enableRealtimeCollection() {
+        return enableRealtimeCollection;
     }
 
     public boolean isUseGELF() {
